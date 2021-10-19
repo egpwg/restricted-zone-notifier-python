@@ -5,6 +5,12 @@
 	    {
             "video": "../resources/worker-zone-detection.mp4"
         }
-    ]
+    ],
+
+  "server": {
+    "ip": "192.168.8.168",
+    "port": "8888",
+    "url": "/detection/alert"
+  }
     
 }

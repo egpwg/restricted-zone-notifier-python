@@ -2,7 +2,6 @@
 
 """
  Copyright (c) 2018 Intel Corporation.
-
  Permission is hereby granted, free of charge, to any person obtaining
  a copy of this software and associated documentation files (the
  "Software"), to deal in the Software without restriction, including
@@ -10,10 +9,8 @@
  distribute, sublicense, and/or sell copies of the Software, and to
  permit person to whom the Software is furnished to do so, subject to
  the following conditions:
-
  The above copyright notice and this permission notice shall be
  included in all copies or substantial portions of the Software.
-
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -21,7 +18,6 @@
  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 """
 
 import os
@@ -33,15 +29,17 @@ import cv2
 
 import logging as log
 import paho.mqtt.client as mqtt
+import requests
 
+from datetime import datetime
 from threading import Thread
 from collections import namedtuple
 from argparse import ArgumentParser
 from inference import Network
 
 # Assemblyinfo contains information about assembly area
-MyStruct = namedtuple("assemblyinfo", "safe")
-INFO = MyStruct(True)
+MyStruct = namedtuple("assemblyinfo", "present")
+INFO = MyStruct(False)
 
 # MQTT server environment variables
 HOSTNAME = socket.gethostname()
@@ -62,11 +60,12 @@ KEEP_RUNNING = True
 
 DELAY = 5
 
+FRAME = 0
+
 
 def build_argparser():
     """
     Parse command line arguments.
-
     :return: Command line arguments
     """
     parser = ArgumentParser()
@@ -127,7 +126,6 @@ def check_args():
 def ssd_out(res, args, initial_wh, selected_region):
     """
     Parse SSD output.
-
     :param res: Detection results
     :param args: Parsed arguments
     :param initial_wh: Initial width and height of the frame
@@ -135,8 +133,13 @@ def ssd_out(res, args, initial_wh, selected_region):
     :return: None
     """
     global INFO
+    # array of all people detected in the frame, get length for people count
     person = []
-    INFO = INFO._replace(safe=True)
+    # info originally contained boolean named "worker_safe"
+    #   true when no one is detected
+    #   false when person is detected
+    # now it's true when person is detected and false when no one is detected
+    INFO = INFO._replace(present=False)
 
     for obj in res[0][0]:
         # Draw objects only when probability is more than specified threshold
@@ -164,31 +167,46 @@ def ssd_out(res, args, initial_wh, selected_region):
         else:
             if area_of_person > area_of_intersection:
                 # assembly line area flags
-                INFO = INFO._replace(safe=True)
+                INFO = INFO._replace(present=False)
             else:
                 # assembly line area flags
-                INFO = INFO._replace(safe=False)
+                INFO = INFO._replace(present=True)
 
 
 def message_runner():
     """
     Publish worker status to MQTT topic.
     Pauses for rate second(s) between updates
-
     :return: None
     """
+    # ORIGINAL
+    # while KEEP_RUNNING:
+    #     time.sleep(1)
+    #     print("Frame:", FRAME, "Seconds:", FRAME/60, "Person present:", INFO.present)
+    #     CLIENT.publish(TOPIC, payload=json.dumps({"Person present": INFO.present,
+    #                                               "Alert": not INFO.present}))
+
+    # NEW
     while KEEP_RUNNING:
         time.sleep(1)
-        CLIENT.publish(TOPIC, payload=json.dumps({"Worker safe": INFO.safe,
-                                                  "Alert": not INFO.safe}))
+        # print("Frame:", FRAME, "Seconds:", FRAME/60, "Person present:", INFO.present)
+        if INFO.present:
+            # print("PRESENT")
+            #http://192.168.8.168:8888/detection/alert
+            r = requests.post("http://" + CONFIG['server']['ip'] + ":" + CONFIG['server']['port'] + CONFIG['server']['url'],
+                              data={'camera': CONFIG['inputs'][0]['video'], 'time': datetime.now().isoformat('T') + 'Z'},
+                              verify=False)
+            # print("request sent")
+
 
 
 def main():
     """
     Load the network and parse the output.
-
     :return: None
     """
+    global CONFIG
+    global FRAME
     global DELAY
     global CLIENT
     global SIG_CAUGHT
@@ -210,18 +228,35 @@ def main():
     check_args()
 
     assert os.path.isfile(CONFIG_FILE), "{} file doesn't exist".format(CONFIG_FILE)
-    config = json.loads(open(CONFIG_FILE).read())
+    CONFIG = json.loads(open(CONFIG_FILE).read())
 
-    for idx, item in enumerate(config['inputs']):
+    for idx, item in enumerate(CONFIG['inputs']):
         if item['video'].isdigit():
             input_stream = int(item['video'])
         else:
             input_stream = item['video']
 
-    cap = cv2.VideoCapture(input_stream)
+    cap = cv2.VideoCapture(input_stream, cv2.CAP_V4L)
     if not cap.isOpened():
         logger.error("ERROR! Unable to open video source")
         sys.exit(1)
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+    frame_width = int(cap.get(3))
+    frame_height = int(cap.get(4))
+
+    size = (frame_width, frame_height)
+
+    # Below VideoWriter object will create
+    # a frame of above defined The output
+    # is stored in 'filename.avi' file.
+    now = datetime.now().strftime("%Y%m%d%H%M%S")
+    filename = now + '.avi'
+    result = cv2.VideoWriter(filename,
+                             cv2.VideoWriter_fourcc(*'MJPG'),
+                             25, size)
 
     # Init inference request IDs
     cur_request_id = 0
@@ -255,7 +290,7 @@ def main():
             KEEP_RUNNING = False
             log.error("ERROR! blank FRAME grabbed")
             break
-
+        FRAME = FRAME + 1
         # If either default values or negative numbers are given,
         # then we will default to start of the FRAME
         if roi_x <= 0 or roi_y <= 0:
@@ -311,19 +346,23 @@ def main():
         render_time_message = "OpenCV rendering time: {:.3f} ms". \
             format(render_time * 1000)
 
-        if not INFO.safe:
+        # adjusted the boolean here
+        if INFO.present:
             warning = "HUMAN IN ASSEMBLY AREA: PAUSE THE MACHINE!"
             cv2.putText(frame, warning, (15, 100), cv2.FONT_HERSHEY_COMPLEX, 0.8, (0, 0, 255), 2)
+            print("person present")
 
         log_message = "Async mode is on." if is_async_mode else \
             "Async mode is off."
         cv2.putText(frame, log_message, (15, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.putText(frame, inf_time_message, (15, 35), cv2.FONT_HERSHEY_COMPLEX, 0.5, (255, 255, 255), 1)
         cv2.putText(frame, render_time_message, (15, 55), cv2.FONT_HERSHEY_COMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, "Worker Safe: {}".format(INFO.safe), (15, 75), cv2.FONT_HERSHEY_COMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(frame, "Person present: {}".format(INFO.present), (15, 75), cv2.FONT_HERSHEY_COMPLEX, 0.5, (255, 255, 255), 1)
 
         render_start = time.time()
-        cv2.imshow("Restricted Zone Notifier", frame)
+        # cv2.imshow("Restricted Zone Notifier", frame)
+        result.write(frame)
+        # print("person present:", INFO.present)
         render_end = time.time()
         render_time = render_end - render_start
 
@@ -345,13 +384,13 @@ def main():
     infer_network.clean()
     message_thread.join()
     cap.release()
-    cv2.destroyAllWindows()
+    result.release()
+    # cv2.destroyAllWindows()
     CLIENT.disconnect()
 
 
 if __name__ == '__main__':
     main()
-
 
 
 
