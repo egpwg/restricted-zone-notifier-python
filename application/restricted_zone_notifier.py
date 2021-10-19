@@ -189,14 +189,10 @@ def message_runner():
     # NEW
     while KEEP_RUNNING:
         time.sleep(1)
-        # print("Frame:", FRAME, "Seconds:", FRAME/60, "Person present:", INFO.present)
         if INFO.present:
-            # print("PRESENT")
-            #http://192.168.8.168:8888/detection/alert
             r = requests.post("http://" + CONFIG['server']['ip'] + ":" + CONFIG['server']['port'] + CONFIG['server']['url'],
                               data={'camera': CONFIG['inputs'][0]['video'], 'time': datetime.now().isoformat('T') + 'Z'},
                               verify=False)
-            # print("request sent")
 
 
 

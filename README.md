@@ -17,7 +17,7 @@ This application is designed to detect the humans present in a predefined select
 ### Hardware
 
 * 6th to 8th generation Intel® Core™ processors with Iris® Pro graphics or Intel® HD Graphics
- 
+
 ### Software
 
 * [Ubuntu\* 18.04 LTS](http://releases.ubuntu.com/16.04/)
@@ -25,7 +25,7 @@ This application is designed to detect the humans present in a predefined select
 * OpenCL™ Runtime package
 
   *Note*: We recommend using a 4.14+ kernel to use this software. Run the following command to determine your kernel version:
- 
+
       uname -a
   
 * Intel® Distribution of OpenVINO™ toolkit 2020 R3 Release
@@ -49,7 +49,7 @@ Steps to clone the reference implementation:
 ```
 sudo apt-get update && sudo apt-get install git
 git clone https://github.com/intel-iot-devkit/restricted-zone-notifier-python.git 
-``` 
+```
 ### Install Intel® Distribution of OpenVINO™ toolkit
 
 Refer to https://software.intel.com/en-us/articles/OpenVINO-Install-Linux for more information about how to install and setup the Intel® Distribution of OpenVINO™ toolkit.
@@ -63,14 +63,14 @@ Mosquitto is an open source message broker that implements the MQTT protocol. Th
 ### Which model to use
 This application uses the [person-detection-retail-0013](https://docs.openvinotoolkit.org/2020.3/_models_intel_person_detection_retail_0013_description_person_detection_retail_0013.html)
  Intel® pre-trained model, that can be accessed using the **model downloader**. The **model downloader** downloads the __.xml__ and __.bin__ files that will be used by the application.
- 
+
 To install the dependencies of the RI and to download the **person-detection-retail-0013** Intel® model, run the following command:
 
     cd <path_to_the_restricted-zone-notifier-python_directory>
     ./setup.sh 
 
 The model will be downloaded inside the following directory:
- 
+
     /opt/intel/openvino/deployment_tools/open_model_zoo/tools/downloader/intel/person-detection-retail-0013/
 
 ### The Config File
@@ -138,7 +138,7 @@ For example, if the output of above command is /dev/video0, then config.json wou
 You must configure the environment to use the Intel® Distribution of OpenVINO™ toolkit one time per session by running the following command:
 
     source /opt/intel/openvino/bin/setupvars.sh
-    
+
 __Note__: This command needs to be executed only once in the terminal where the application will be executed. If the terminal is closed, the command needs to be executed again.
     
 ## Run the application
@@ -179,7 +179,7 @@ To run with multiple devices use -d MULTI:device1,device2. For example: -d MULTI
 * To run on the integrated Intel® GPU with floating point precision 32 (FP32), use the `-d GPU` command-line argument:
     ```
     python3 restricted_zone_notifier.py -m /opt/intel/openvino/deployment_tools/open_model_zoo/tools/downloader/intel/person-detection-retail-0013/FP32/person-detection-retail-0013.xml -d GPU
-    ```  
+    ```
     **FP32**: FP32 is single-precision floating-point arithmetic uses 32 bits to represent numbers. 8 bits for the magnitude and 23 bits for the precision. For more information, [click here](https://en.wikipedia.org/wiki/Single-precision_floating-point_format)<br>
 
 * To run on the integrated Intel® GPU with floating point precision 16 (FP16):
@@ -192,7 +192,7 @@ To run with multiple devices use -d MULTI:device1,device2. For example: -d MULTI
 To run on the Intel® Neural Compute Stick, use the ```-d MYRIAD``` command-line argument:
 
     python3 restricted_zone_notifier.py -m /opt/intel/openvino/deployment_tools/open_model_zoo/tools/downloader/intel/person-detection-retail-0013/FP16/person-detection-retail-0013.xml -d MYRIAD
-    
+
 ### Running on the Intel® Movidius™ VPU
 To run on the Intel® Movidius™ VPU, use the ```-d HDDL ``` command-line argument:
 
@@ -216,3 +216,27 @@ You should change the `MQTT_CLIENT_ID` to a unique value for each monitoring sta
 If you want to monitor the MQTT messages sent to your local server, and you have the `mosquitto` client utilities installed, you can run the following command in new terminal while executing the code:
 
     mosquitto_sub -h localhost -t Restricted_zone_python
+
+## Sent Message via RESTful API
+
+Code from restricted_zone_notifier.py
+```python
+ # NEW
+    while KEEP_RUNNING:
+        time.sleep(1)
+        if INFO.present:
+            r = requests.post("http://" + CONFIG['server']['ip'] + ":" + CONFIG['server']['port'] + CONFIG['server']['url'],
+                              data={'camera': CONFIG['inputs'][0]['video'], 'time': datetime.now().isoformat('T') + 'Z'},
+                              verify=False)
+```
+
+You can setting the server in the *./resources/config.json*
+
+```json
+"server": {
+    "ip": "192.168.8.168",
+    "port": "8888",
+    "url": "/detection/alert"
+  }
+```
+
